@@ -10,16 +10,32 @@
 		"Other"
 	],
 	"activationEvents": [
-		"onCommand:breakpoint-scripts.helloWorld"
+		"*"
 	],
 	"main": "./out/extension.js",
 	"contributes": {
 		"commands": [
 			{
-				"command": "breakpoint-scripts.helloWorld",
-				"title": "Hello World"
+				"command": "breakpoint-scripts.AddScriptPoint",
+				"title": "Add ScriptPoint"
 			}
-		]
+		],
+		"menus": {
+			"editor/context": [
+				{
+					"command": "breakpoint-scripts.AddScriptPoint",
+					"group": "scriptPoints"
+				}
+			]
+		},
+		"views": {
+			"debug": [
+				{
+					"id": "scriptPoints",
+					"name": "scriptPoints"
+				}
+			]
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
@@ -41,5 +57,8 @@
 		"mocha": "^8.1.3",
 		"typescript": "^4.1.2",
 		"vscode-test": "^1.4.1"
+	},
+	"dependencies": {
+		"vscode-debugprotocol": "^1.44.0"
 	}
 }

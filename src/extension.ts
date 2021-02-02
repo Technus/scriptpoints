@@ -1,27 +1,114 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import { BreakpointsChangeEvent, DebugSession, Position, window, debug } from 'vscode';
+const { spawn } = require('child_process');
+import { DebugProtocol } from 'vscode-debugprotocol';
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+class ScriptPoint
+{
+	constructor(path: string, position: Position)
+	{
+		this.path = path;
+		this.position = position;
+	}
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "breakpoint-scripts" is now active!');
-
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	let disposable = vscode.commands.registerCommand('breakpoint-scripts.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from Breakpoint Scripts!');
-	});
-
-	context.subscriptions.push(disposable);
+	path: string;
+	position: Position;
 }
 
-// this method is called when your extension is deactivated
+export function activate(context: vscode.ExtensionContext)
+{
+	let points: ScriptPoint[] = [];
+	
+	context.subscriptions.push(vscode.commands.registerCommand('breakpoint-scripts.AddScriptPoint', (uri: vscode.Uri) =>
+	{
+		if (!window.activeTextEditor)
+		{
+			window.showInformationMessage('Can\'t set scriptpoint: no active document');
+			return;
+		}
+		points.push(new ScriptPoint(uri.fsPath, window.activeTextEditor.selection.active));
+	}));
+
+	// Snoop on messages between vs code and the debugger to infer the active thread and stack frame
+	context.subscriptions.push(debug.registerDebugAdapterTrackerFactory("*",
+	{
+		createDebugAdapterTracker: session =>
+		{
+			return {
+				onWillStartSession: () =>
+				{
+					for (const breakpoint of debug.breakpoints)
+					{
+						console.log('bp: ' + breakpoint.id);
+					}
+				},
+				
+				onWillEndSession: () =>
+				{
+				},
+
+				onDidSendMessage: async (message: DebugProtocol.ProtocolMessage) => 
+				{
+					let session = debug.activeDebugSession;
+					if (!session)
+					{
+						return;
+					}
+
+					if (message.type === 'response')
+					{
+						// console.log('DAP response: ' + (message as DebugProtocol.Response).command);
+					}
+					else if (message.type === 'event')
+					{
+						let event = message as DebugProtocol.Event;
+						if (event.event === 'stopped')
+						{
+							let stopped = event as DebugProtocol.StoppedEvent;
+							if (stopped.body.reason === 'breakpoint')
+							{
+								// Get the top frame of the stopped thread
+								let stackArgs: DebugProtocol.StackTraceArguments = { threadId: stopped.body.threadId ?? -1, startFrame: 0, levels: 1 };
+								const stackTrace = await session.customRequest('stackTrace', stackArgs) as DebugProtocol.StackTraceResponse;
+								if (stackTrace.success && stackTrace.body.stackFrames.length > 0)
+								{
+									//stackTrace.body.stackFrames[0]
+									//debug.breakpoints
+								}
+							}
+						}
+						// console.log('DAP event: ' + (event).event);
+					}
+				},
+
+				onWillReceiveMessage(message: DebugProtocol.ProtocolMessage): void
+				{
+					if (message.type === 'request')
+					{
+						let request = message as DebugProtocol.Request;
+						if (request.command === 'setBreakpoints')
+						{
+							let setBreakpoints = request as DebugProtocol.SetBreakpointsRequest;
+							if (setBreakpoints.arguments.breakpoints)
+							{
+								for (const point of points)
+								{
+									if (setBreakpoints.arguments.source.path === point.path)
+									{
+										let breakpoint: DebugProtocol.SourceBreakpoint = {
+											line: point.position.line
+										};
+										setBreakpoints.arguments.breakpoints.push(breakpoint);
+									}
+								}
+							}
+						}
+						// console.log('DAP request: ' + (message as DebugProtocol.Request).command);
+					}
+				}
+			};
+		}
+	}));
+}
+
 export function deactivate() {}
