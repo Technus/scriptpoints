@@ -14,28 +14,6 @@
 	],
 	"main": "./out/extension.js",
 	"contributes": {
-		"commands": [
-			{
-				"command": "breakpoint-scripts.AddScriptPoint",
-				"title": "Add ScriptPoint"
-			}
-		],
-		"menus": {
-			"editor/context": [
-				{
-					"command": "breakpoint-scripts.AddScriptPoint",
-					"group": "scriptPoints"
-				}
-			]
-		},
-		"views": {
-			"debug": [
-				{
-					"id": "scriptPoints",
-					"name": "scriptPoints"
-				}
-			]
-		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
