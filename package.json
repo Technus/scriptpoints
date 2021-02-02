@@ -2,7 +2,8 @@
 	"name": "scriptpoints",
 	"displayName": "Scriptpoints",
 	"description": "Make breakpoints that run scripts when hit",
-	"version": "0.0.1",
+	"version": "0.0.2",
+	"publisher": "MaxAbernethy2",
 	"engines": {
 		"vscode": "^1.52.0"
 	},
@@ -38,5 +39,9 @@
 	},
 	"dependencies": {
 		"vscode-debugprotocol": "^1.44.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/webewildered/scriptpoints"
 	}
 }

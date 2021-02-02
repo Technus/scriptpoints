@@ -20,6 +20,7 @@ async function executeScriptpoint(message: string, session: DebugSession, frameI
 {
 	return new Promise<boolean>(async (resolve, reject) =>
 	{
+		// Extract the script from the log string
 		let f: Function;
 		let match = message.match(/!!?\s*(.*)/);
 		if (!match || match.length < 2)
@@ -30,6 +31,7 @@ async function executeScriptpoint(message: string, session: DebugSession, frameI
 		}
 		let script = match[1];
 
+		// Set up the environment script environment
 		let log = (message: string) => debug.activeDebugConsole.appendLine(message);
 		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, args);
 		let evaluate = async (expression: string) => 
@@ -38,6 +40,7 @@ async function executeScriptpoint(message: string, session: DebugSession, frameI
 			const response = await session.customRequest('evaluate', evaluateArgs);
 			return response.result;
 		};
+
 		try
 		{
 			let f = Function('"use strict"; return async function(log, command, evaluate){ ' + script + ' }')();
@@ -56,8 +59,6 @@ async function executeScriptpoint(message: string, session: DebugSession, frameI
 
 export function activate(context: vscode.ExtensionContext)
 {
-	context.subscriptions.push(vscode.commands.registerCommand('breakpoint-scripts.helloWorld', (s?: string) => { console.log("hello " + s??"none"); }));
-	
 	// Discussion in https://github.com/microsoft/vscode/issues/63444 says that you need to register for BreakpointsChangeEvent
 	// in order for vscode.debug.breakpoints to be kept up to date.  That quote has been removed from the linked documentation,
 	// but it appears to be true that without registering an event, vscodedebug.breakpoints is sometimes empty even after one of

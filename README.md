@@ -1,6 +1,6 @@
 # Scriptpoints
 
-With this extension enabled you can make breakpoints that execute JavaScript when hit.  Just create a logpoint that begins with !, and the rest of the message is interpreted as javascript.  You can also start with !! to make execution pause when the scriptpoint is hit.
+This extension can make breakpoints run JavaScript when hit.  Just create a logpoint that begins with !, and the rest of the message is interpreted as JS.  You can also start with !! to make execution pause when the scriptpoint is hit.
 
 ## Environment
 
