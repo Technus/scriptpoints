@@ -57,6 +57,12 @@ async function executeScriptpoint(message: string, session: DebugSession, frameI
 export function activate(context: vscode.ExtensionContext)
 {
 	context.subscriptions.push(vscode.commands.registerCommand('breakpoint-scripts.helloWorld', (s?: string) => { console.log("hello " + s??"none"); }));
+	
+	// Discussion in https://github.com/microsoft/vscode/issues/63444 says that you need to register for BreakpointsChangeEvent
+	// in order for vscode.debug.breakpoints to be kept up to date.  That quote has been removed from the linked documentation,
+	// but it appears to be true that without registering an event, vscodedebug.breakpoints is sometimes empty even after one of
+	// the breakpoints has already been hit.
+	context.subscriptions.push(debug.onDidChangeBreakpoints((e: vscode.BreakpointsChangeEvent) => {}));
 
 	// Snoop on messages between vs code and the debugger to infer the active thread and stack frame
 	context.subscriptions.push(debug.registerDebugAdapterTrackerFactory("*",
@@ -66,20 +72,16 @@ export function activate(context: vscode.ExtensionContext)
 			return {
 				onWillStartSession: () =>
 				{
+					console.log('session begins');
 				},
 				
 				onWillEndSession: () =>
 				{
+					console.log('session ends');
 				},
 
 				onDidSendMessage: async (message: DebugProtocol.ProtocolMessage) => 
 				{
-					let session = debug.activeDebugSession;
-					if (!session)
-					{
-						return;
-					}
-
 					if (message.type === 'response')
 					{
 						// console.log('DAP response: ' + (message as DebugProtocol.Response).command);
@@ -94,44 +96,50 @@ export function activate(context: vscode.ExtensionContext)
 							{
 								// Get the top frame of the stopped thread
 								let threadId = stopped.body.threadId ?? 0; // TODO what to use when no thread ID is specified?
+								console.log('breakpoint threadId = ' + threadId);
+
 								let stackArgs: DebugProtocol.StackTraceArguments = { threadId: threadId, startFrame: 0, levels: 1 };
-								const stackTrace = await session.customRequest('stackTrace', stackArgs);// as DebugProtocol.StackTraceResponse;
-								//if (!stackTrace.success || stackTrace.body.stackFrames.length === 0)
-								// TODO it seems that at least the C++ debugger does not return a StackTraceResponse?
-								// Or maybe session.customRequest() just returns the body from the response?
-								if (!stackTrace.stackFrames || stackTrace.stackFrames.length === 0)
+								try
 								{
-									return;
-								}
-
-								const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
-								for (const breakpoint of debug.breakpoints)
-								{
-									// Find scriptpoints
-									if (!breakpoint.logMessage || !isScriptpoint(breakpoint.logMessage))
+									const stackTrace = await session.customRequest('stackTrace', stackArgs);
+									if (!stackTrace.stackFrames || stackTrace.stackFrames.length === 0)
 									{
-										continue;
+										return;
 									}
 
-									// Check if it's a source breakpoint
-									let location = (breakpoint as SourceBreakpoint).location;
-									if (!location)
+									const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
+									for (const breakpoint of debug.breakpoints)
 									{
-										continue;
-									}
-
-									// Check if the breakpoint location matches the stopped thread's top frame
-									// Note, vscode Location uses line and column numbers indexed from zero, while DAP seems to index from 1.
-									// TODO - figure out how source references work
-									if (location.uri.fsPath === frame.source?.path && location.range.contains(new Position(frame.line - 1, frame.column - 1)))
-									{
-										let success = await executeScriptpoint(breakpoint.logMessage, session, frame.id);
-										if (success && !isBreakScriptpoint(breakpoint.logMessage))
+										// Find scriptpoints
+										if (!breakpoint.logMessage || !isScriptpoint(breakpoint.logMessage))
 										{
-											let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
-											session.customRequest('continue', continueArgs);
+											continue;
+										}
+
+										// Check if it's a source breakpoint
+										let location = (breakpoint as SourceBreakpoint).location;
+										if (!location)
+										{
+											continue;
+										}
+
+										// Check if the breakpoint location matches the stopped thread's top frame
+										// Note, vscode Location uses line and column numbers indexed from zero, while DAP seems to index from 1.
+										// TODO - figure out how source references work
+										if (location.uri.fsPath === frame.source?.path && location.range.contains(new Position(frame.line - 1, 0)))
+										{
+											let success = await executeScriptpoint(breakpoint.logMessage, session, frame.id);
+											if (success && !isBreakScriptpoint(breakpoint.logMessage))
+											{
+												let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
+												session.customRequest('continue', continueArgs);
+											}
 										}
 									}
+								}
+								catch (e)
+								{
+									console.log('stack trace failed: "' + e + "'");
 								}
 							}
 						}
