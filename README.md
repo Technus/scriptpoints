@@ -1,65 +1,16 @@
-# breakpoint-scripts README
+# Scriptpoints
 
-This is the README for your extension "breakpoint-scripts". After writing up a brief description, we recommend including the following sections.
+With this extension enabled you can make breakpoints that execute JavaScript when hit.  Just create a logpoint that begins with !, and the rest of the message is interpreted as javascript.  You can also start with !! to make execution pause when the scriptpoint is hit.
 
-## Features
+## Environment
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+There are three useful functions available to your script:
+* **log('message')** writes a line to the debug console.
+* **command('commandName', ...args)** executes a VS Code command.
+* **async evaluate('expression')** evaluates an expression in the context of the program being debugged and returns its value as a string, just as if the expression were entered in the watch window.  Note that because evaluate is **async**, you must write **await evaluate('expression')** to get the result of the evaluation.
 
-For example if there is an image subfolder under your extension project workspace:
+## Uses
 
-\!\[feature X\]\(images/feature-x.png\)
+Scriptpoints let you write complex logging logic without needing to modify the code of the program you are debugging.  For instance, you could use it to log a message if a list contains a particular item.  Or you could log the square root of a variable instead of the variable itself.  Or you could send 2D points to a command that adds them to a graph.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
-
-## Requirements
-
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: enable/disable this extension
-* `myExtension.thing`: set to `blah` to do something
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
------------------------------------------------------------------------------------------------------------
-
-## Working with Markdown
-
-**Note:** You can author your README using Visual Studio Code.  Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux)
-* Toggle preview (`Shift+CMD+V` on macOS or `Shift+Ctrl+V` on Windows and Linux)
-* Press `Ctrl+Space` (Windows, Linux) or `Cmd+Space` (macOS) to see a list of Markdown snippets
-
-### For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Scriptpoints work even for debuggers that have not implemented logpoint support, like vscode-cpptools.  So, you can write *!log(async evaluate('myVariable'))* to get the equivalent of the logpoint *{myVariable}*.

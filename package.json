@@ -1,6 +1,6 @@
 {
-	"name": "breakpoint-scripts",
-	"displayName": "Breakpoint Scripts",
+	"name": "scriptpoints",
+	"displayName": "Scriptpoints",
 	"description": "Make breakpoints that run scripts when hit",
 	"version": "0.0.1",
 	"engines": {

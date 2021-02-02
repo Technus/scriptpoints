@@ -15,20 +15,49 @@ function isBreakScriptpoint(message: string)
 	return (message.length > 2 && message[1] === '!');
 }
 
-function executeScriptpoint(message: string)
+// Executes the scriptpoint.  Returns true on success, false in case of error.
+async function executeScriptpoint(message: string, session: DebugSession, frameId: number): Promise<boolean>
 {
-	let match = message.match(/!!?\s*(.*)/);
-	if (!match || match.length < 2)
+	return new Promise<boolean>(async (resolve, reject) =>
 	{
-		console.log('Error, could not execute script "' + message + "'");
-		return;
-	}
-	let script = match[1];
-	debug.activeDebugConsole.appendLine('script "' + script + '"');
+		let f: Function;
+		let match = message.match(/!!?\s*(.*)/);
+		if (!match || match.length < 2)
+		{
+			console.log('Error, could not execute script "' + message + "'");
+			resolve(false);
+			return;
+		}
+		let script = match[1];
+
+		let log = (message: string) => debug.activeDebugConsole.appendLine(message);
+		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, args);
+		let evaluate = async (expression: string) => 
+		{
+			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
+			const response = await session.customRequest('evaluate', evaluateArgs);
+			return response.result;
+		};
+		try
+		{
+			let f = Function('"use strict"; return async function(log, command, evaluate){ ' + script + ' }')();
+			await f(log, command, evaluate);
+		}
+		catch (e)
+		{
+			window.showErrorMessage('Exception "' + e + '" executing scriptpoint');
+			resolve(false);
+			return;
+		}
+
+		resolve(true);
+	});
 }
 
 export function activate(context: vscode.ExtensionContext)
 {
+	context.subscriptions.push(vscode.commands.registerCommand('breakpoint-scripts.helloWorld', (s?: string) => { console.log("hello " + s??"none"); }));
+
 	// Snoop on messages between vs code and the debugger to infer the active thread and stack frame
 	context.subscriptions.push(debug.registerDebugAdapterTrackerFactory("*",
 	{
@@ -37,10 +66,6 @@ export function activate(context: vscode.ExtensionContext)
 			return {
 				onWillStartSession: () =>
 				{
-					for (const breakpoint of debug.breakpoints)
-					{
-						console.log('bp: ' + breakpoint.id);
-					}
 				},
 				
 				onWillEndSession: () =>
@@ -79,7 +104,7 @@ export function activate(context: vscode.ExtensionContext)
 									return;
 								}
 
-								const frame = stackTrace.stackFrames[0];
+								const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
 								for (const breakpoint of debug.breakpoints)
 								{
 									// Find scriptpoints
@@ -100,8 +125,8 @@ export function activate(context: vscode.ExtensionContext)
 									// TODO - figure out how source references work
 									if (location.uri.fsPath === frame.source?.path && location.range.contains(new Position(frame.line - 1, frame.column - 1)))
 									{
-										executeScriptpoint(breakpoint.logMessage);
-										if (!isBreakScriptpoint(breakpoint.logMessage))
+										let success = await executeScriptpoint(breakpoint.logMessage, session, frame.id);
+										if (success && !isBreakScriptpoint(breakpoint.logMessage))
 										{
 											let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
 											session.customRequest('continue', continueArgs);
