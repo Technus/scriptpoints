@@ -1,9 +1,6 @@
 # Change Log
 
-All notable changes to the "breakpoint-scripts" extension will be documented in this file.
+## 0.0.2
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
-## [Unreleased]
-
-- Initial release
+* added **memory()** to read memory from the debugee
+* scriptpoints now execute when hit while single stepping
