@@ -16,7 +16,7 @@ Note that evaluate() and memory() are **async** functions, because they need to 
 
 Scriptpoints let you write complex logging logic without needing to modify the code of the program you are debugging.  For instance, you could use it to log a message if a list contains a particular item.  Or you could log the square root of a variable instead of the variable itself.  Or you could send 2D points to a command that adds them to a graph.
 
-Scriptpoints work even for debuggers that have not implemented logpoint support, like vscode-cpptools.  So, you can write *!log(async evaluate('myVariable'))* to get the equivalent of the logpoint *{myVariable}*.
+Scriptpoints work even for debuggers that have not implemented logpoint support, like vscode-cpptools.  So, you can write *!log(await evaluate('myVariable'))* to get the equivalent of the logpoint *{myVariable}*.
 
 ## Limitations
 
