@@ -15,6 +15,10 @@
 	],
 	"main": "./out/extension.js",
 	"contributes": {
+		"commands": {
+            "command": "scriptpoints.test",
+            "title": "ScriptpointsTest"
+		}
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",

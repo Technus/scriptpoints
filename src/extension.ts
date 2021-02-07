@@ -21,7 +21,10 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 	return new Promise<boolean>(async (resolve, reject) =>
 	{
 		// Set up the environment script environment
-		let log = (message: string) => debug.activeDebugConsole.appendLine(message);
+		let log = (message: string) =>
+		{
+			debug.activeDebugConsole.appendLine(message);
+		};
 		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, ...args);
 		let evaluate = async (expression: string) => 
 		{
@@ -85,6 +88,12 @@ export function activate(context: vscode.ExtensionContext)
 		scriptpoints: Scriptpoint[] = []; // List of scriptpoints in the source
 	}
 
+	context.subscriptions.push(vscode.commands.registerCommand('scriptpoints.test', () =>
+	{
+		vscode.debug.activeDebugConsole.appendLine('foo');
+		vscode.debug.activeDebugConsole.appendLine('bar');
+	}));
+
 	// Snoop on messages between vs code and the debugger to infer the active thread and stack frame
 	context.subscriptions.push(debug.registerDebugAdapterTrackerFactory("*",
 	{
@@ -93,6 +102,7 @@ export function activate(context: vscode.ExtensionContext)
 			let setBreakpointsSeq = -1; // Sequence ID of the latest SetBreakpoints request
 			let sources = new Map<string, ScriptpointSource>(); // Map source identifier to a list of scriptpoints
 			let idToSource = new Map<number, ScriptpointSource>(); // Map breakpoint identifier to a list of scriptpoints
+			let step = false; // true if execution was last continued by a step command
 
 			return {
 				onWillStartSession: () =>
@@ -137,6 +147,8 @@ export function activate(context: vscode.ExtensionContext)
 						{
 							let stopped = event as DebugProtocol.StoppedEvent;
 							let threadId = stopped.body.threadId ?? 0; // TODO what to use when no thread ID is specified?
+							let stepped = step;
+							step = false;
 							
 							try
 							{
@@ -168,17 +180,22 @@ export function activate(context: vscode.ExtensionContext)
 
 									// Check if the debugger is stopped at the scriptpoint
 									let breakpoint = scriptpoint.breakpoint;
-									let match: boolean = false;
+									let match: boolean;
 									if (breakpoint.instructionReference)
 									{
 										// When available, match by instruction address
 										match = (breakpoint.instructionReference === frame.instructionPointerReference);
 									}
-									else if (breakpoint.line !== undefined && breakpoint.source !== undefined && breakpoint.source === frame.source)
+									else
 									{
-										// Match by source.  At least file and line must be defined, but also match endline, column, and endcolumn if available.
-										match = (breakpoint.line === frame.line && breakpoint.endLine === frame.endLine && 
-											breakpoint.column === frame.column && breakpoint.endColumn === frame.endColumn);
+										// Match by source.  At least path and line must be defined and equal, but also match endline, column, and
+										// endcolumn if available.
+										match = (
+											breakpoint.source !== undefined && breakpoint.source.path !== undefined && breakpoint.source.path === frame.source.path && 
+											breakpoint.line !== undefined && breakpoint.line === frame.line &&
+											breakpoint.endLine === frame.endLine && 
+											breakpoint.column === frame.column &&
+											breakpoint.endColumn === frame.endColumn);
 									}
 
 									// If so, execute the scriptpoint
@@ -187,7 +204,7 @@ export function activate(context: vscode.ExtensionContext)
 										// On successful execution, if the scriptpoint does not request to stop execution, and execution is not
 										// already stopped, ask the debugger to continue
 										let success = await executeScriptpoint(scriptpoint.script, session, frame.id);
-										if (success && !scriptpoint.stop && stopped.body.reason.includes('breakpoint'))
+										if (success && !scriptpoint.stop && !stepped && stopped.body.reason.includes('breakpoint'))
 										{
 											// 
 											let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
@@ -295,6 +312,10 @@ export function activate(context: vscode.ExtensionContext)
 								// Clear the log message
 								breakpoint.logMessage = undefined;
 							}
+						}
+						else if (['next', 'stepIn', 'stepOut'].includes(request.command))
+						{
+							step = true;
 						}
 					}
 				}
