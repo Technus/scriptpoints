@@ -15,7 +15,7 @@ function isBreakScriptpoint(message: string)
 	return (message.length > 2 && message[1] === '!');
 }
 
-// Executes the scriptpoint.  Returns true on success, false in case of error.
+// Executes a scriptpoint.  Returns true on success, false in case of error.
 async function executeScriptpoint(message: string, session: DebugSession, frameId: number): Promise<boolean>
 {
 	return new Promise<boolean>(async (resolve, reject) =>
@@ -33,22 +33,31 @@ async function executeScriptpoint(message: string, session: DebugSession, frameI
 
 		// Set up the environment script environment
 		let log = (message: string) => debug.activeDebugConsole.appendLine(message);
-		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, args);
+		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, ...args);
 		let evaluate = async (expression: string) => 
 		{
 			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
 			const response = await session.customRequest('evaluate', evaluateArgs);
 			return response.result;
 		};
+		let memory = async (expression: string, size: number) =>
+		{
+			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
+			const response = await session.customRequest('evaluate', evaluateArgs);
+			const memoryArgs: DebugProtocol.ReadMemoryArguments = { memoryReference: response.memoryReference, offset: 0, count: size };
+			const memory = await session.customRequest('readMemory', memoryArgs);
+			return memory.data;
+		};
 
 		try
 		{
-			let f = Function('"use strict"; return async function(log, command, evaluate){ ' + script + ' }')();
-			await f(log, command, evaluate);
+			let f = Function('"use strict"; return async function(log, command, evaluate, memory){ ' + script + ' }')();
+			await f(log, command, evaluate, memory);
 		}
 		catch (e)
 		{
-			window.showErrorMessage('Exception "' + e + '" executing scriptpoint');
+			let errorMessage = 'Scriptpoint exception "' + e + '" executing: "' + script + '"';
+			debug.activeDebugConsole.appendLine('\u001b[31m' + errorMessage + '\u001b[0m');
 			resolve(false);
 			return;
 		}
@@ -70,77 +79,83 @@ export function activate(context: vscode.ExtensionContext)
 	{
 		createDebugAdapterTracker: session =>
 		{
+			// Check if the thread is stopped at a scriptpoint, and executes it if so.
+			// Returns true if a scriptpoint is executed successfully and does not request the program to break, else false.
+			const checkAndExecuteScriptpoint = async (threadId: number): Promise<boolean> =>
+			{
+				return new Promise<boolean>(async (resolve, reject) =>
+				{
+					try
+					{
+						// Do a stack trace to find out where we are
+						let stackArgs: DebugProtocol.StackTraceArguments = { threadId: threadId, startFrame: 0, levels: 1 };
+						const stackTrace = await session.customRequest('stackTrace', stackArgs);
+						if (!stackTrace.stackFrames || stackTrace.stackFrames.length === 0)
+						{
+							resolve(false);
+							return;
+						}
+
+						const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
+						for (const breakpoint of debug.breakpoints)
+						{
+							// Find scriptpoints
+							if (!breakpoint.logMessage || !isScriptpoint(breakpoint.logMessage))
+							{
+								continue;
+							}
+
+							// Check if it's a source breakpoint
+							let location = (breakpoint as SourceBreakpoint).location;
+							if (!location)
+							{
+								continue;
+							}
+
+							// Check if the breakpoint location matches the stopped thread's top frame
+							// Note, vscode Location uses line and column numbers indexed from zero, while DAP seems to index from 1.
+							// TODO - figure out how source references work
+							if (location.uri.fsPath === frame.source?.path && location.range.contains(new Position(frame.line - 1, 0)))
+							{
+								let success = await executeScriptpoint(breakpoint.logMessage, session, frame.id);
+								resolve(success && !isBreakScriptpoint(breakpoint.logMessage));
+								return;
+							}
+						}
+					}
+					catch (e)
+					{
+						console.log('scriptpoints: checkScriptpoint() failed with "' + e + "'");
+					}
+
+					resolve(false);
+				});
+			};
+
 			return {
 				onWillStartSession: () =>
 				{
-					console.log('session begins');
 				},
 				
 				onWillEndSession: () =>
 				{
-					console.log('session ends');
 				},
 
 				onDidSendMessage: async (message: DebugProtocol.ProtocolMessage) => 
 				{
-					if (message.type === 'response')
-					{
-						// console.log('DAP response: ' + (message as DebugProtocol.Response).command);
-					}
-					else if (message.type === 'event')
+					if (message.type === 'event')
 					{
 						let event = message as DebugProtocol.Event;
 						if (event.event === 'stopped')
 						{
 							let stopped = event as DebugProtocol.StoppedEvent;
-							if (stopped.body.reason === 'breakpoint')
+							if (stopped.body.reason.includes('breakpoint'))
 							{
-								// Get the top frame of the stopped thread
 								let threadId = stopped.body.threadId ?? 0; // TODO what to use when no thread ID is specified?
-								console.log('breakpoint threadId = ' + threadId);
-
-								let stackArgs: DebugProtocol.StackTraceArguments = { threadId: threadId, startFrame: 0, levels: 1 };
-								try
+								if (await checkAndExecuteScriptpoint(threadId) && stopped.body.reason.includes('breakpoint'))
 								{
-									const stackTrace = await session.customRequest('stackTrace', stackArgs);
-									if (!stackTrace.stackFrames || stackTrace.stackFrames.length === 0)
-									{
-										return;
-									}
-
-									const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
-									for (const breakpoint of debug.breakpoints)
-									{
-										// Find scriptpoints
-										if (!breakpoint.logMessage || !isScriptpoint(breakpoint.logMessage))
-										{
-											continue;
-										}
-
-										// Check if it's a source breakpoint
-										let location = (breakpoint as SourceBreakpoint).location;
-										if (!location)
-										{
-											continue;
-										}
-
-										// Check if the breakpoint location matches the stopped thread's top frame
-										// Note, vscode Location uses line and column numbers indexed from zero, while DAP seems to index from 1.
-										// TODO - figure out how source references work
-										if (location.uri.fsPath === frame.source?.path && location.range.contains(new Position(frame.line - 1, 0)))
-										{
-											let success = await executeScriptpoint(breakpoint.logMessage, session, frame.id);
-											if (success && !isBreakScriptpoint(breakpoint.logMessage))
-											{
-												let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
-												session.customRequest('continue', continueArgs);
-											}
-										}
-									}
-								}
-								catch (e)
-								{
-									console.log('stack trace failed: "' + e + "'");
+									let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
+									session.customRequest('continue', continueArgs);
 								}
 							}
 						}
@@ -149,26 +164,6 @@ export function activate(context: vscode.ExtensionContext)
 
 				onWillReceiveMessage(message: DebugProtocol.ProtocolMessage): void
 				{
-					if (message.type === 'request')
-					{
-						let request = message as DebugProtocol.Request;
-						if (request.command === 'setBreakpoints')
-						{
-							let setBreakpoints = request as DebugProtocol.SetBreakpointsRequest;
-							if (!setBreakpoints.arguments.breakpoints)
-							{
-								return;
-							}
-							for (const breakpoint of setBreakpoints.arguments.breakpoints)
-							{
-								if (isScriptpoint(breakpoint.logMessage))
-								{
-									breakpoint.logMessage = undefined;
-								}
-							}
-						}
-						// console.log('DAP request: ' + (message as DebugProtocol.Request).command);
-					}
 				}
 			};
 		}

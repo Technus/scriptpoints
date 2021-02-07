@@ -4,10 +4,13 @@ This extension can make breakpoints run JavaScript when hit.  Just create a logp
 
 ## Environment
 
-There are three useful functions available to your script:
-* **log('message')** writes a line to the debug console.
-* **command('commandName', ...args)** executes a VS Code command.
-* **async evaluate('expression')** evaluates an expression in the context of the program being debugged and returns its value as a string, just as if the expression were entered in the watch window.  Note that because evaluate is **async**, you must write **await evaluate('expression')** to get the result of the evaluation.
+There are some useful functions available to your script:
+* **log(message: string)** writes a line to the debug console.
+* **command(command: string, ...args)** executes a VS Code command with the provided arguments.
+* **async evaluate(expression: string): string** evaluates an expression in the context of the program being debugged and returns its value, the same as if you entered the expression in the watch panel.
+* **async memory(expression: string, bytes: number): string** evaluates an expression and returns a chunk of memory beginning at the address of the value in base64. This only works in languages that support reading memory, like C++.
+
+Note that evaluate() and memory() are **async** functions, because they need to use async APIs for communicating with the debugger.  So you need to use them with **await**.  For example, you should write *log(await evaluate('myVariable'))*, as *log(evaluate('myVariable'))* will not work.
 
 ## Uses
 
