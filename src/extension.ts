@@ -16,21 +16,10 @@ function isBreakScriptpoint(message: string)
 }
 
 // Executes a scriptpoint.  Returns true on success, false in case of error.
-async function executeScriptpoint(message: string, session: DebugSession, frameId: number): Promise<boolean>
+async function executeScriptpoint(script: string, session: DebugSession, frameId: number): Promise<boolean>
 {
 	return new Promise<boolean>(async (resolve, reject) =>
 	{
-		// Extract the script from the log string
-		let f: Function;
-		let match = message.match(/!!?\s*(.*)/);
-		if (!match || match.length < 2)
-		{
-			console.log('Error, could not execute script "' + message + "'");
-			resolve(false);
-			return;
-		}
-		let script = match[1];
-
 		// Set up the environment script environment
 		let log = (message: string) => debug.activeDebugConsole.appendLine(message);
 		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, ...args);
@@ -74,63 +63,36 @@ export function activate(context: vscode.ExtensionContext)
 	// the breakpoints has already been hit.
 	context.subscriptions.push(debug.onDidChangeBreakpoints((e: vscode.BreakpointsChangeEvent) => {}));
 
+	class Scriptpoint
+	{
+		constructor(index: number, script: string, stop: boolean)
+		{
+			this.index = index;
+			this.script = script;
+			this.stop = stop;
+			this.breakpoint = undefined;
+		}
+
+		index: number; // Index in the SetBreakpoints reqeuest
+		script: string; // Script to execute when hit
+		stop: boolean; // Whether to stop execution when hit
+		breakpoint : DebugProtocol.Breakpoint | undefined;
+	}
+
+	class ScriptpointSource
+	{
+		setBreakpointsSeq: number = -1; // Sequence number of the latest SetBreakpoints request
+		scriptpoints: Scriptpoint[] = []; // List of scriptpoints in the source
+	}
+
 	// Snoop on messages between vs code and the debugger to infer the active thread and stack frame
 	context.subscriptions.push(debug.registerDebugAdapterTrackerFactory("*",
 	{
 		createDebugAdapterTracker: session =>
 		{
-			// Check if the thread is stopped at a scriptpoint, and executes it if so.
-			// Returns true if a scriptpoint is executed successfully and does not request the program to break, else false.
-			const checkAndExecuteScriptpoint = async (threadId: number): Promise<boolean> =>
-			{
-				return new Promise<boolean>(async (resolve, reject) =>
-				{
-					try
-					{
-						// Do a stack trace to find out where we are
-						let stackArgs: DebugProtocol.StackTraceArguments = { threadId: threadId, startFrame: 0, levels: 1 };
-						const stackTrace = await session.customRequest('stackTrace', stackArgs);
-						if (!stackTrace.stackFrames || stackTrace.stackFrames.length === 0)
-						{
-							resolve(false);
-							return;
-						}
-
-						const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
-						for (const breakpoint of debug.breakpoints)
-						{
-							// Find scriptpoints
-							if (!breakpoint.logMessage || !isScriptpoint(breakpoint.logMessage))
-							{
-								continue;
-							}
-
-							// Check if it's a source breakpoint
-							let location = (breakpoint as SourceBreakpoint).location;
-							if (!location)
-							{
-								continue;
-							}
-
-							// Check if the breakpoint location matches the stopped thread's top frame
-							// Note, vscode Location uses line and column numbers indexed from zero, while DAP seems to index from 1.
-							// TODO - figure out how source references work
-							if (location.uri.fsPath === frame.source?.path && location.range.contains(new Position(frame.line - 1, 0)))
-							{
-								let success = await executeScriptpoint(breakpoint.logMessage, session, frame.id);
-								resolve(success && !isBreakScriptpoint(breakpoint.logMessage));
-								return;
-							}
-						}
-					}
-					catch (e)
-					{
-						console.log('scriptpoints: checkScriptpoint() failed with "' + e + "'");
-					}
-
-					resolve(false);
-				});
-			};
+			let setBreakpointsSeq = -1; // Sequence ID of the latest SetBreakpoints request
+			let sources = new Map<string, ScriptpointSource>(); // Map source identifier to a list of scriptpoints
+			let idToSource = new Map<number, ScriptpointSource>(); // Map breakpoint identifier to a list of scriptpoints
 
 			return {
 				onWillStartSession: () =>
@@ -143,19 +105,132 @@ export function activate(context: vscode.ExtensionContext)
 
 				onDidSendMessage: async (message: DebugProtocol.ProtocolMessage) => 
 				{
-					if (message.type === 'event')
+					if (message.type === 'response')
+					{
+						let response = message as DebugProtocol.Response;
+						for (const source of sources.values())
+						{
+							if (source.setBreakpointsSeq === response.request_seq)
+							{
+								// Save the breakpoints so that they can be identified when the debugger stops
+								let breakpointsResponse = response as DebugProtocol.SetBreakpointsResponse;
+								for (const scriptpoint of source.scriptpoints)
+								{
+									scriptpoint.breakpoint = breakpointsResponse.body.breakpoints[scriptpoint.index];
+
+									// If the breakpoint has an ID, map it to the source
+									// This is necessary because, for some reason, later BreakpointEvents
+									// can give the source path with different casing, but on some OS paths
+									// are case sensitive
+									if (scriptpoint.breakpoint.id)
+									{
+										idToSource.set(scriptpoint.breakpoint.id, source);
+									}
+								}
+							}
+						}
+					}
+					else if (message.type === 'event')
 					{
 						let event = message as DebugProtocol.Event;
 						if (event.event === 'stopped')
 						{
 							let stopped = event as DebugProtocol.StoppedEvent;
-							if (stopped.body.reason.includes('breakpoint'))
+							let threadId = stopped.body.threadId ?? 0; // TODO what to use when no thread ID is specified?
+							
+							try
 							{
-								let threadId = stopped.body.threadId ?? 0; // TODO what to use when no thread ID is specified?
-								if (await checkAndExecuteScriptpoint(threadId) && stopped.body.reason.includes('breakpoint'))
+								// Do a stack trace to find out where we are
+								let stackArgs: DebugProtocol.StackTraceArguments = { threadId: threadId, startFrame: 0, levels: 1 };
+								const stackTrace = await session.customRequest('stackTrace', stackArgs);
+								if (!stackTrace.stackFrames || stackTrace.stackFrames.length === 0)
 								{
-									let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
-									session.customRequest('continue', continueArgs);
+									return;
+								}
+
+								const frame = stackTrace.stackFrames[0] as DebugProtocol.StackFrame;
+								if (!frame.source || !frame.source.path)
+								{
+									return; // todo: support source references
+								}
+								const source = sources.get(frame.source.path);
+								if (!source)
+								{
+									return;
+								}
+
+								for (const scriptpoint of source.scriptpoints)
+								{
+									if (!scriptpoint.breakpoint)
+									{
+										continue; // unexpected
+									}
+
+									// Check if the debugger is stopped at the scriptpoint
+									let breakpoint = scriptpoint.breakpoint;
+									let match: boolean = false;
+									if (breakpoint.instructionReference)
+									{
+										// When available, match by instruction address
+										match = (breakpoint.instructionReference === frame.instructionPointerReference);
+									}
+									else if (breakpoint.line !== undefined && breakpoint.source !== undefined && breakpoint.source === frame.source)
+									{
+										// Match by source.  At least file and line must be defined, but also match endline, column, and endcolumn if available.
+										match = (breakpoint.line === frame.line && breakpoint.endLine === frame.endLine && 
+											breakpoint.column === frame.column && breakpoint.endColumn === frame.endColumn);
+									}
+
+									// If so, execute the scriptpoint
+									if (match)
+									{
+										// On successful execution, if the scriptpoint does not request to stop execution, and execution is not
+										// already stopped, ask the debugger to continue
+										let success = await executeScriptpoint(scriptpoint.script, session, frame.id);
+										if (success && !scriptpoint.stop && stopped.body.reason.includes('breakpoint'))
+										{
+											// 
+											let continueArgs : DebugProtocol.ContinueArguments = { threadId: threadId };
+											session.customRequest('continue', continueArgs);
+										}
+									}
+								}
+							}
+							catch (e)
+							{
+								console.log('scriptpoints: checkScriptpoint() failed with "' + e + "'");
+							}
+						}
+						else if (event.event === 'breakpoint')
+						{
+							// Get the scriptpoint list for the breakpoint's source
+							let breakpointEvent = event as DebugProtocol.BreakpointEvent;
+							let breakpoint = breakpointEvent.body.breakpoint;
+							if (!breakpoint.source || !breakpoint.source.path || !breakpoint.id)
+							{
+								return; // todo: support source references
+							}
+							let source: ScriptpointSource | undefined;
+							if (breakpoint.id)
+							{
+								source = idToSource.get(breakpoint.id);
+							}
+							else
+							{
+								source = sources.get(breakpoint.source.path);
+							}
+							if (!source)
+							{
+								return;
+							}
+
+							// Search the list for a matching ID and update the scriptpoint
+							for (const scriptpoint of source.scriptpoints)
+							{
+								if (scriptpoint.breakpoint?.id === breakpoint.id)
+								{
+									scriptpoint.breakpoint = breakpoint;
+									break;
 								}
 							}
 						}
@@ -164,6 +239,64 @@ export function activate(context: vscode.ExtensionContext)
 
 				onWillReceiveMessage(message: DebugProtocol.ProtocolMessage): void
 				{
+					if (message.type === 'request')
+					{
+						let request = message as DebugProtocol.Request;
+						if (request.command === 'setBreakpoints')
+						{
+							// Find or create the source entry
+							let setBreakpoints = request as DebugProtocol.SetBreakpointsRequest;
+							let path = setBreakpoints.arguments.source.path;
+							if (!path)
+							{
+								return; // todo: support source references
+							}
+							let source = sources.get(path);
+							if (!source)
+							{
+								source = new ScriptpointSource();
+								sources.set(path, source);
+							}
+							
+							// Clear the scriptpoint list and save the request ID so that it can be
+							// matched to a future response
+							source.scriptpoints = [];
+							source.setBreakpointsSeq = request.seq;
+
+							// Convert logpoints with scripts to normal breakpoints, so that the debugger
+							// will stop and provide an opportunity to execute the script.
+							if (!setBreakpoints.arguments.breakpoints)
+							{
+								return;
+							}
+							for (let i = 0; i < setBreakpoints.arguments.breakpoints.length; i++)
+							{
+								// Check if it's a scriptpoint
+								const breakpoint = setBreakpoints.arguments.breakpoints[i];
+								if (!breakpoint.logMessage || breakpoint.logMessage.length === 0 || breakpoint.logMessage[0] !== '!')
+								{
+									continue;
+								}
+
+								// Check if execution should stop when hit
+								let stop = (breakpoint.logMessage.length > 1 && breakpoint.logMessage[1] === '!');
+
+								// Extract the script
+								let match = breakpoint.logMessage.match(/!!?\s*(.*)/);
+								if (!match || match.length < 2)
+								{
+									continue;
+								}
+								let script = match[1];
+
+								// Add to the scriptpoint list
+								source.scriptpoints.push(new Scriptpoint(i, script, stop));
+
+								// Clear the log message
+								breakpoint.logMessage = undefined;
+							}
+						}
+					}
 				}
 			};
 		}
