@@ -21,4 +21,4 @@ Scriptpoints work even for debuggers that have not implemented logpoint support,
 ## Limitations
 
 * If your program is paused and you step over a line of code that has a scriptpoint on it, execution will pause again at that scriptpoint.
-* So far this extension has only been tested with C++ and JS. While it should work with any language, there could be bugs if those languages' debug adapters work too much differently from the ones that I tried.
+* So far this extension has only been tested with C++ and JS. While it should work with any language, there could be bugs if those languages' debug adapters work differently from the ones that I tried.
