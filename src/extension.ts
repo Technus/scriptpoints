@@ -30,11 +30,12 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 			let out = "";
 			if (variablesReference > 0) {
 				const variablesArgs: DebugProtocol.VariablesArguments = { variablesReference: variablesReference };
-				const variables = await session.customRequest('variables', variablesArgs) as DebugProtocol.VariablesResponse["body"]["variables"];
-				variables.forEach(variable => {
+				const variables = (await session.customRequest('variables', variablesArgs) as DebugProtocol.VariablesResponse["body"]).variables;
+				for (let index = 0; index < variables.length; ++index) {
+					const variable = variables[index];
 					out += "  ".repeat(indentLevel) + variable.name + ": " + variable.value + "\n";
-					out += variableCrawl(variable.variablesReference, indentLevel + 1);
-				});
+					out += await variableCrawl(variable.variablesReference, indentLevel + 1);
+				}
 			}
 			return out;
 		};
@@ -42,7 +43,7 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
 			const response = await session.customRequest('evaluate', evaluateArgs) as DebugProtocol.EvaluateResponse["body"];
 			let out = expression + ": " + response.result + "\n";
-			out += variableCrawl(response.variablesReference, 1);
+			out += await variableCrawl(response.variablesReference, 1);
 			return out;
 		};
 		let memory = async (expression: string, size: number) => {
@@ -102,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
 	// Snoop on messages between vs code and the debugger to infer the active thread and stack frame
 	context.subscriptions.push(debug.registerDebugAdapterTrackerFactory("*",
 		{
-			createDebugAdapterTracker: (session:any) => {
+			createDebugAdapterTracker: (session: any) => {
 				let setBreakpointsSeq = -1; // Sequence ID of the latest SetBreakpoints request
 				let sources = new Map<string, ScriptpointSource>(); // Map source identifier to a list of scriptpoints
 				let idToSource = new Map<number, ScriptpointSource>(); // Map breakpoint identifier to a list of scriptpoints
