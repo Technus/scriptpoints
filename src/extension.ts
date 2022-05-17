@@ -46,6 +46,21 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 			out += await variableCrawl(response.variablesReference, 1);
 			return out;
 		};
+		let context = async () => {
+			return {
+				vscode: vscode,
+				DebugProtocol: DebugProtocol,
+				Breakpoint: Breakpoint,
+				SourceBreakpoint: SourceBreakpoint,
+				DebugSession: DebugSession,
+				Position: Position,
+				window: window,
+				debug: debug,
+				script: script,
+				session: session,
+				frameId: frameId,
+			};
+		};
 		let memory = async (expression: string, size: number) => {
 			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
 			const response = await session.customRequest('evaluate', evaluateArgs);
@@ -55,8 +70,8 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 		};
 
 		try {
-			let f = Function('"use strict"; return async function(log, command, evaluate, variables, memory){ ' + script + ' }')();
-			await f(log, command, evaluate, variables, memory);
+			let f = Function('"use strict"; return async function(log, command, evaluate, variables, memory, context){ ' + script + ' }')();
+			await f(log, command, evaluate, variables, memory, context);
 		}
 		catch (e) {
 			let errorMessage = 'Scriptpoint exception "' + e + '" executing: "' + script + '"';
