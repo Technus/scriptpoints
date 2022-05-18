@@ -55,8 +55,8 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 		};
 
 		try {
-			let f = Function('"use strict"; return async function(log, command, evaluate, variables, memory, vscode,DebugProtocol,Breakpoint,SourceBreakpoint,DebugSession,Position,window,debug,script,session,frameId){ ' + script + ' }')();
-			await f(log, command, evaluate, variables, memory, vscode,DebugProtocol,Breakpoint,SourceBreakpoint,DebugSession,Position,window,debug,script,session,frameId);
+			let f = Function('"use strict"; return async function(log, command, evaluate, variables, memory, vscode,DebugProtocol,Breakpoint,SourceBreakpoint,Position,window,debug,script,session,frameId){ ' + script + ' }')();
+			await f(log, command, evaluate, variables, memory, vscode,DebugProtocol,Breakpoint,SourceBreakpoint,Position,window,debug,script,session,frameId);
 		}
 		catch (e) {
 			let errorMessage = 'Scriptpoint exception "' + e + '" executing: "' + script + '"';
