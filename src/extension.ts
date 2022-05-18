@@ -20,12 +20,15 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 		let log = (message: string) => {
 			debug.activeDebugConsole.appendLine(message);
 		};
+		// Runs the IDE command
 		let command = (command: string, ...args: any[]) => vscode.commands.executeCommand(command, ...args);
+		// Evaluates a single variable (not a struct or anything special)
 		let evaluate = async (expression: string) => {
 			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
 			const response = await session.customRequest('evaluate', evaluateArgs) as DebugProtocol.EvaluateResponse["body"];
 			return response.result;
 		};
+		// Internal function to crawl the variable tree getting all sub variables
 		let variableCrawl = async (variablesReference: number, indentLevel: number) => {
 			let out = "";
 			if (variablesReference > 0) {
@@ -39,6 +42,7 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 			}
 			return out;
 		};
+		// Gets the variable tree as string
 		let variables = async (expression: string) => {
 			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
 			const response = await session.customRequest('evaluate', evaluateArgs) as DebugProtocol.EvaluateResponse["body"];
@@ -46,6 +50,7 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 			out += await variableCrawl(response.variablesReference, 1);
 			return out;
 		};
+		// Gets memory region
 		let memory = async (expression: string, size: number) => {
 			const evaluateArgs: DebugProtocol.EvaluateArguments = { expression: expression, frameId: frameId };
 			const response = await session.customRequest('evaluate', evaluateArgs);
@@ -54,6 +59,7 @@ async function executeScriptpoint(script: string, session: DebugSession, frameId
 			return memory.data;
 		};
 
+		// Runs the delegated command
 		try {
 			let f = Function('"use strict"; return async function(log, command, evaluate, variables, memory, vscode,DebugProtocol,Breakpoint,SourceBreakpoint,Position,window,debug,script,session,frameId){ ' + script + ' }')();
 			await f(log, command, evaluate, variables, memory, vscode,DebugProtocol,Breakpoint,SourceBreakpoint,Position,window,debug,script,session,frameId);
